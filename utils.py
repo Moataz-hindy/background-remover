@@ -1,5 +1,7 @@
 import torch
 import matplotlib.pyplot as plt
+import cv2
+import numpy as np
 
 def train_step(model, data_loader, loss_fn, optimizer, device):
     model.train()
@@ -186,3 +188,37 @@ def plot_training_curves(
 
     plt.tight_layout()
     plt.show()
+
+
+
+def postprocess_mask(tensor_mask):
+    """
+    Takes a PyTorch tensor binary mask and applies cleanup operations.
+    """
+    # 1. Convert PyTorch tensor to 2D NumPy array (uint8)
+    mask = tensor_mask.squeeze().cpu().numpy()
+    mask = (mask * 255).astype(np.uint8)
+
+    # 2. Open: Removes small noise/dust in the background
+    kernel = np.ones((5, 5), np.uint8)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
+
+    # 3. FILL ALL HOLES using Contours (This fixes the shirt issue!)
+    # RETR_EXTERNAL only grabs the outermost boundaries, ignoring internal holes
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    
+    # Create a blank mask and draw the contours completely filled in
+    filled_mask = np.zeros_like(mask)
+    cv2.drawContours(filled_mask, contours, -1, 255, thickness=cv2.FILLED)
+    mask = filled_mask
+
+    # 4. Keep only the largest connected component (removes large background blobs)
+    num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(mask, connectivity=8)
+    if num_labels > 1:
+        largest_label = 1 + np.argmax(stats[1:, cv2.CC_STAT_AREA])
+        mask = np.where(labels == largest_label, 255, 0).astype(np.uint8)
+
+    # 5. Smooth the edges for alpha blending
+    mask = cv2.GaussianBlur(mask, (5, 5), 0)
+
+    return mask / 255.0
