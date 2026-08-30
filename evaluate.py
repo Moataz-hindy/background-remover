@@ -71,13 +71,14 @@ def run_evaluation(
     apply_contour_filling=True,
     apply_largest_component=True,
     apply_smoothing=True,
-    output_json="evaluation_results.json"
+    output_json="evaluation_results.json",
+    model_class=BackgroundRemoval
 ):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
 
     # Model
-    model = BackgroundRemoval().to(device)
+    model = model_class().to(device)
     checkpoint = torch.load(checkpoint_path, map_location=device)
     if isinstance(checkpoint, dict) and "model_state_dict" in checkpoint:
         model.load_state_dict(checkpoint["model_state_dict"])
