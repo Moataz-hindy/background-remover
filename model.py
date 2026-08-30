@@ -68,11 +68,13 @@ class ResidualConvBlock(nn.Module):
 
 
 class EncoderBlock(nn.Module):
-    def __init__(self, in_channels, out_channels):
+    def __init__(self, in_channels, out_channels, use_residual=True):
         super(EncoderBlock, self).__init__()
 
-        # Defining the layers inside nn.Sequential for cleaner code
-        self.conv_block = ResidualConvBlock(in_channels, out_channels)
+        if use_residual:
+            self.conv_block = ResidualConvBlock(in_channels, out_channels)
+        else:
+            self.conv_block = ConvBlock(in_channels, out_channels)
 
         self.max_pool = nn.MaxPool2d(kernel_size=2, stride=2)
 
@@ -84,13 +86,13 @@ class EncoderBlock(nn.Module):
 
 
 class Encoder(nn.Module):
-    def __init__(self):
+    def __init__(self, use_residual=True):
         super().__init__()
 
-        self.encoder_block_1 = EncoderBlock(3, 32)
-        self.encoder_block_2 = EncoderBlock(32, 64)
-        self.encoder_block_3 = EncoderBlock(64, 128)
-        self.encoder_block_4 = EncoderBlock(128, 256)
+        self.encoder_block_1 = EncoderBlock(3, 32, use_residual)
+        self.encoder_block_2 = EncoderBlock(32, 64, use_residual)
+        self.encoder_block_3 = EncoderBlock(64, 128, use_residual)
+        self.encoder_block_4 = EncoderBlock(128, 256, use_residual)
 
     def forward(self, x):
         self.skips = []
@@ -111,19 +113,20 @@ class Encoder(nn.Module):
 
 
 class Bottleneck(nn.Module):
-    def __init__(self, in_channels, out_channels):
+    def __init__(self, in_channels, out_channels, use_residual=True):
         super().__init__()
 
-        # What layer do we already have
-        # that can transform these channels?
-        self.conv_block = ResidualConvBlock(in_channels, out_channels)
+        if use_residual:
+            self.conv_block = ResidualConvBlock(in_channels, out_channels)
+        else:
+            self.conv_block = ConvBlock(in_channels, out_channels)
 
     def forward(self, x):
         return self.conv_block(x)
 
 
 class DecoderBlock(nn.Module):
-    def __init__(self, in_channels, skip_channels, out_channels):
+    def __init__(self, in_channels, skip_channels, out_channels, use_residual=True):
         super().__init__()
 
         # What layer do we already have
@@ -142,7 +145,10 @@ class DecoderBlock(nn.Module):
             )
         )
 
-        self.conv_block = ResidualConvBlock(skip_channels + out_channels, out_channels)
+        if use_residual:
+            self.conv_block = ResidualConvBlock(skip_channels + out_channels, out_channels)
+        else:
+            self.conv_block = ConvBlock(skip_channels + out_channels, out_channels)
 
     def forward(self, x, skip):
         x = self.upsample(x)
@@ -152,31 +158,35 @@ class DecoderBlock(nn.Module):
 
 
 class Decoder(nn.Module):
-    def __init__(self):
+    def __init__(self, use_residual=True):
         super().__init__()
 
         self.decoder_block_1 = DecoderBlock(
             in_channels=512,
             skip_channels=256,
             out_channels=256,
+            use_residual=use_residual
         )
 
         self.decoder_block_2 = DecoderBlock(
             in_channels=256,
             skip_channels=128,
             out_channels=128,
+            use_residual=use_residual
         )
 
         self.decoder_block_3 = DecoderBlock(
             in_channels=128,
             skip_channels=64,
             out_channels=64,
+            use_residual=use_residual
         )
         
         self.decoder_block_4 = DecoderBlock(
             in_channels=64,
             skip_channels=32,
             out_channels=32,
+            use_residual=use_residual
         )
 
     def forward(self, x, skips):
@@ -202,11 +212,11 @@ class SegmentationHead(nn.Module):
 
 
 class BackgroundRemoval(nn.Module):
-    def __init__(self):
+    def __init__(self, use_residual=True):
         super().__init__()
-        self.encoder = Encoder()
-        self.bottleneck = Bottleneck(256, 512)
-        self.decoder = Decoder()
+        self.encoder = Encoder(use_residual)
+        self.bottleneck = Bottleneck(256, 512, use_residual)
+        self.decoder = Decoder(use_residual)
         self.seg_head = SegmentationHead()
         self.dropout = nn.Dropout2d(p=0.2)
 

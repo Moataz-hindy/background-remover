@@ -24,39 +24,38 @@ def train_step(model, data_loader, loss_fn, optimizer, device):
     return train_loss
 
 
+from metrics import segmentation_metrics
+
 def val_step(model, data_loader, loss_fn, device):
-    val_loss, val_iou, val_dice = 0, 0, 0
+    val_loss = 0
+    total_metrics = {"iou": 0, "dice": 0, "precision": 0, "recall": 0, "boundary_f1": 0, "boundary_iou": 0}
+    num_samples = 0
     model.eval()
 
     with torch.inference_mode():
         for X, y in data_loader:
             X, y = X.to(device), y.to(device)
+            batch_size = X.size(0)
 
             val_pred = model(X)
             probs = torch.sigmoid(val_pred)
             pred = probs > 0.4
 
-            val_loss += loss_fn(val_pred, y).item()
-            iou, dice = segmentation_metrics(pred, y)
-            val_iou += iou.mean().item()
-            val_dice += dice.mean().item()
+            val_loss += loss_fn(val_pred, y).item() * batch_size
+            
+            metrics = segmentation_metrics(pred, y)
+            for k in total_metrics.keys():
+                total_metrics[k] += metrics[k].sum().item()
+            
+            num_samples += batch_size
 
-        val_loss /= len(data_loader)
-        val_iou /= len(data_loader)
-        val_dice /= len(data_loader)
+        val_loss /= num_samples
+        for k in total_metrics.keys():
+            total_metrics[k] /= num_samples
 
-        print(f"Val loss: {val_loss:.5f} | Val iou: {val_iou:.5f} | Val dice: {val_dice:.5f}")
-    return val_loss, val_iou, val_dice
-
-
-def segmentation_metrics(pred, target):
-    intersection = (pred * target).sum(dim=(1, 2, 3))
-    union = ((pred + target) > 0).float().sum(dim=(1, 2, 3))
-    dice_denominator = pred.sum(dim=(1, 2, 3)) + target.sum(dim=(1, 2, 3))
-
-    iou = (intersection + 1e-8) / (union + 1e-8)
-    dice = (2 * intersection + 1e-8) / (dice_denominator + 1e-8)
-    return iou, dice
+        print(f"Val loss: {val_loss:.5f} | Val iou: {total_metrics['iou']:.5f} | Val dice: {total_metrics['dice']:.5f} | "
+              f"Val bf1: {total_metrics['boundary_f1']:.5f} | Val biou: {total_metrics['boundary_iou']:.5f}")
+    return val_loss, total_metrics['iou'], total_metrics['dice']
 
 
 def evaluate_thresholds(model, data_loader, device):
@@ -66,38 +65,35 @@ def evaluate_thresholds(model, data_loader, device):
 
     with torch.inference_mode():
         for threshold in thresholds:
-            total_iou = 0
-            total_dice = 0
+            total_metrics = {"iou": 0, "dice": 0, "precision": 0, "recall": 0, "boundary_f1": 0}
+            num_samples = 0
 
             for X, y in data_loader:
                 X, y = X.to(device), y.to(device)
+                batch_size = X.size(0)
 
                 logits = model(X)
                 probs = torch.sigmoid(logits)
                 pred = (probs > threshold).float()
 
-                intersection = (pred * y).sum(dim=(1, 2, 3))
-                union = ((pred + y) > 0).float().sum(dim=(1, 2, 3))
-                dice_denominator = pred.sum(dim=(1, 2, 3)) + y.sum(dim=(1, 2, 3))
+                metrics = segmentation_metrics(pred, y)
+                for k in total_metrics.keys():
+                    total_metrics[k] += metrics[k].sum().item()
+                
+                num_samples += batch_size
 
-                iou = (intersection + 1e-8) / (union + 1e-8)
-                dice = (2 * intersection + 1e-8) / (dice_denominator + 1e-8)
+            for k in total_metrics.keys():
+                total_metrics[k] /= num_samples
 
-                total_iou += iou.mean().item()
-                total_dice += dice.mean().item()
-
-            avg_iou = total_iou / len(data_loader)
-            avg_dice = total_dice / len(data_loader)
-
-            results[threshold] = {
-                "IoU": avg_iou,
-                "Dice": avg_dice
-            }
+            results[threshold] = total_metrics
 
             print(
                 f"Threshold: {threshold:.1f} | "
-                f"IoU: {avg_iou:.4f} | "
-                f"Dice: {avg_dice:.4f}"
+                f"IoU: {total_metrics['iou']:.4f} | "
+                f"Dice: {total_metrics['dice']:.4f} | "
+                f"Prec: {total_metrics['precision']:.4f} | "
+                f"Rec: {total_metrics['recall']:.4f} | "
+                f"BF1: {total_metrics['boundary_f1']:.4f}"
             )
 
     return results
@@ -191,34 +187,41 @@ def plot_training_curves(
 
 
 
-def postprocess_mask(tensor_mask):
+def postprocess_mask(
+    tensor_mask,
+    apply_morphology=True,
+    apply_contour_filling=True,
+    apply_largest_component=True,
+    apply_smoothing=True
+):
     """
-    Takes a PyTorch tensor binary mask and applies cleanup operations.
+    Takes a PyTorch tensor binary mask and applies cleanup operations conditionally.
     """
     # 1. Convert PyTorch tensor to 2D NumPy array (uint8)
     mask = tensor_mask.squeeze().cpu().numpy()
     mask = (mask * 255).astype(np.uint8)
 
     # 2. Open: Removes small noise/dust in the background
-    kernel = np.ones((5, 5), np.uint8)
-    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
+    if apply_morphology:
+        kernel = np.ones((5, 5), np.uint8)
+        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
 
-    # 3. FILL ALL HOLES using Contours (This fixes the shirt issue!)
-    # RETR_EXTERNAL only grabs the outermost boundaries, ignoring internal holes
-    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    
-    # Create a blank mask and draw the contours completely filled in
-    filled_mask = np.zeros_like(mask)
-    cv2.drawContours(filled_mask, contours, -1, 255, thickness=cv2.FILLED)
-    mask = filled_mask
+    # 3. FILL ALL HOLES using Contours
+    if apply_contour_filling:
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        filled_mask = np.zeros_like(mask)
+        cv2.drawContours(filled_mask, contours, -1, 255, thickness=cv2.FILLED)
+        mask = filled_mask
 
-    # 4. Keep only the largest connected component (removes large background blobs)
-    num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(mask, connectivity=8)
-    if num_labels > 1:
-        largest_label = 1 + np.argmax(stats[1:, cv2.CC_STAT_AREA])
-        mask = np.where(labels == largest_label, 255, 0).astype(np.uint8)
+    # 4. Keep only the largest connected component
+    if apply_largest_component:
+        num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(mask, connectivity=8)
+        if num_labels > 1:
+            largest_label = 1 + np.argmax(stats[1:, cv2.CC_STAT_AREA])
+            mask = np.where(labels == largest_label, 255, 0).astype(np.uint8)
 
     # 5. Smooth the edges for alpha blending
-    mask = cv2.GaussianBlur(mask, (5, 5), 0)
+    if apply_smoothing:
+        mask = cv2.GaussianBlur(mask, (5, 5), 0)
 
     return mask / 255.0
