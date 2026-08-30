@@ -65,7 +65,7 @@ def evaluate_thresholds(model, data_loader, device):
 
     with torch.inference_mode():
         for threshold in thresholds:
-            total_metrics = {"iou": 0, "dice": 0, "precision": 0, "recall": 0, "boundary_f1": 0}
+            total_metrics = {"iou": 0, "dice": 0, "precision": 0, "recall": 0, "boundary_f1": 0, "boundary_iou": 0}
             num_samples = 0
 
             for X, y in data_loader:
@@ -93,7 +93,8 @@ def evaluate_thresholds(model, data_loader, device):
                 f"Dice: {total_metrics['dice']:.4f} | "
                 f"Prec: {total_metrics['precision']:.4f} | "
                 f"Rec: {total_metrics['recall']:.4f} | "
-                f"BF1: {total_metrics['boundary_f1']:.4f}"
+                f"BF1: {total_metrics['boundary_f1']:.4f} | "
+                f"BIoU: {total_metrics['boundary_iou']:.4f}"
             )
 
     return results
