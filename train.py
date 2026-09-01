@@ -4,7 +4,6 @@ from model import BackgroundRemoval
 from loss import FocalDiceLoss
 from utils import train_step, val_step
 
-
 def run_training(
     train_loader,
     val_loader,
@@ -16,8 +15,6 @@ def run_training(
 ):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
-
-    # Model, Loss, Optimizer
     model = model_class().to(device)
     loss_fn = loss_class()
     optimizer = optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-4)

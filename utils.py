@@ -23,7 +23,6 @@ def train_step(model, data_loader, loss_fn, optimizer, device):
     print(f"Train loss: {train_loss:.5f}")
     return train_loss
 
-
 from metrics import segmentation_metrics
 
 def val_step(model, data_loader, loss_fn, device):
@@ -56,7 +55,6 @@ def val_step(model, data_loader, loss_fn, device):
         print(f"Val loss: {val_loss:.5f} | Val iou: {total_metrics['iou']:.5f} | Val dice: {total_metrics['dice']:.5f} | "
               f"Val bf1: {total_metrics['boundary_f1']:.5f} | Val biou: {total_metrics['boundary_iou']:.5f}")
     return val_loss, total_metrics['iou'], total_metrics['dice']
-
 
 def evaluate_thresholds(model, data_loader, device):
     model.eval()
@@ -98,7 +96,6 @@ def evaluate_thresholds(model, data_loader, device):
             )
 
     return results
-
 
 def visualize_predictions(
     model,
@@ -186,8 +183,6 @@ def plot_training_curves(
     plt.tight_layout()
     plt.show()
 
-
-
 def postprocess_mask(
     tensor_mask,
     apply_morphology=True,
@@ -198,30 +193,21 @@ def postprocess_mask(
     """
     Takes a PyTorch tensor binary mask and applies cleanup operations conditionally.
     """
-    # 1. Convert PyTorch tensor to 2D NumPy array (uint8)
     mask = tensor_mask.squeeze().cpu().numpy()
     mask = (mask * 255).astype(np.uint8)
-
-    # 2. Open: Removes small noise/dust in the background
     if apply_morphology:
         kernel = np.ones((5, 5), np.uint8)
         mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
-
-    # 3. FILL ALL HOLES using Contours
     if apply_contour_filling:
         contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         filled_mask = np.zeros_like(mask)
         cv2.drawContours(filled_mask, contours, -1, 255, thickness=cv2.FILLED)
         mask = filled_mask
-
-    # 4. Keep only the largest connected component
     if apply_largest_component:
         num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(mask, connectivity=8)
         if num_labels > 1:
             largest_label = 1 + np.argmax(stats[1:, cv2.CC_STAT_AREA])
             mask = np.where(labels == largest_label, 255, 0).astype(np.uint8)
-
-    # 5. Smooth the edges for alpha blending
     if apply_smoothing:
         mask = cv2.GaussianBlur(mask, (5, 5), 0)
 

@@ -1,4 +1,3 @@
-import spaces  
 import gradio as gr
 import torch
 import numpy as np
@@ -8,114 +7,105 @@ from albumentations.pytorch import ToTensorV2
 from model import BackgroundRemoval
 from utils import postprocess_mask
 
-# -------------------------------------------------------------
-# 1. LOAD BOTH MODELS ON CPU
-# -------------------------------------------------------------
+# Handle spaces decorator for Hugging Face ZeroGPU or local fallback
+try:
+    import spaces
+except ImportError:
+    class spaces:
+        @staticmethod
+        def GPU(func=None, duration=60):
+            if func is None:
+                return lambda f: f
+            return func
+
+# Determine device and load model globally at startup
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
 def load_custom_model(weights_path):
-    model = BackgroundRemoval()
+    model = BackgroundRemoval(use_residual=True)
     checkpoint = torch.load(weights_path, map_location="cpu")
     model.load_state_dict(checkpoint["model_state_dict"])
     model.eval()
     return model
 
-# CHANGE THESE FILENAMES TO MATCH YOUR UPLOADED .PTH FILES
-model_v1 = load_custom_model("models/res_model.pth")       # Experiment 6
-model_v2 = load_custom_model("models/final_model.pth")  # Experiment 8
+# ZeroGPU best practice: load model and place on device at module level
+final_model = load_custom_model("models/res_model.pth").to(device)
 
-
-# Define the transform
 transform = A.Compose([
-    A.Resize(height=384, width=384),
+    A.Resize(height=256, width=256),
     ToTensorV2(),
 ])
 
-# -------------------------------------------------------------
-# 2. ISOLATE THE GPU WORK (Now with Ensembling!)
-# -------------------------------------------------------------
-@spaces.GPU
-def run_model_on_gpu(tensor_img, model_choice):
-    tensor_img = tensor_img.to("cuda")
-    tensor_img_flipped = torch.flip(tensor_img, dims=[3])
-    
-    # Helper function to do TTA for a specific model
-    def get_model_prediction(model):
-        model.to("cuda")
-        with torch.inference_mode():
-            logits1 = model(tensor_img)
-            probs1 = torch.sigmoid(logits1)
-            
-            logits2 = model(tensor_img_flipped)
-            probs2 = torch.flip(torch.sigmoid(logits2), dims=[3]) 
-            
-            avg_probs = (probs1 + probs2) / 2.0
-        model.to("cpu") # Free GPU memory immediately
-        return avg_probs
-
-    # Choose what to run based on the Dropdown
-    if model_choice == "Model A: The Portrait Specialist":
-        final_probs = get_model_prediction(model_v1)
-        
-    elif model_choice == "Model B: The Generalist (Harsh Lighting)":
-        final_probs = get_model_prediction(model_v2)
-        
-    else: # THE ENSEMBLE (Run both and average them!)
-        probs_A = get_model_prediction(model_v1)
-        probs_B = get_model_prediction(model_v2)
-        final_probs = (probs_A + probs_B) / 2.0
-        
-    # Apply the threshold to the final probabilities
-    raw_mask = (final_probs > 0.4).float().cpu() 
-    
-    return raw_mask
-
-# -------------------------------------------------------------
-# 3. CPU MAIN FUNCTION: Handles the massive 4K arrays instantly
-# -------------------------------------------------------------
-def remove_background(input_image, model_choice):
+@spaces.GPU(duration=60)
+def remove_background(input_image):
     if input_image is None:
         return None
         
+    # Ensure input is 3-channel RGB
+    if input_image.ndim == 2:
+        input_image = cv2.cvtColor(input_image, cv2.COLOR_GRAY2RGB)
+    elif input_image.shape[2] == 4:
+        input_image = cv2.cvtColor(input_image, cv2.COLOR_RGBA2RGB)
+    elif input_image.shape[2] == 1:
+        input_image = cv2.cvtColor(input_image, cv2.COLOR_GRAY2RGB)
+        
     orig_h, orig_w = input_image.shape[:2]
     
-    # 1. Fast resize down to 384x384
+    # Cap maximum dimension to 1024 for responsive web processing
+    MAX_DIM = 1024
+    if max(orig_h, orig_w) > MAX_DIM:
+        scale = MAX_DIM / max(orig_h, orig_w)
+        new_w = int(orig_w * scale)
+        new_h = int(orig_h * scale)
+        input_image = cv2.resize(input_image, (new_w, new_h), interpolation=cv2.INTER_AREA)
+        orig_h, orig_w = new_h, new_w
+        
+    # Prepare tensor for the neural network
     transformed = transform(image=input_image)
     tensor_img = transformed['image'].float().unsqueeze(0) / 255.0
+    tensor_img = tensor_img.to(device)
+    tensor_img_flipped = torch.flip(tensor_img, dims=[3])
     
-    # 2. Send the tiny tensor and model choice to the GPU
-    raw_mask = run_model_on_gpu(tensor_img, model_choice)
+    # Model inference with Test-Time Augmentation (TTA)
+    with torch.inference_mode():
+        logits1 = final_model(tensor_img)
+        probs1 = torch.sigmoid(logits1)
+        
+        logits2 = final_model(tensor_img_flipped)
+        probs2 = torch.flip(torch.sigmoid(logits2), dims=[3])
+        
+        avg_probs = (probs1 + probs2) / 2.0
+        
+    raw_mask = (avg_probs > 0.4).float().cpu()
     
-    # 3. Clean the tiny mask on the CPU
-    clean_mask = postprocess_mask(raw_mask) 
+    # Apply post-processing cleanup on the 256x256 mask
+    clean_mask = postprocess_mask(
+        raw_mask, 
+        apply_morphology=True, 
+        apply_contour_filling=True, 
+        apply_largest_component=False, 
+        apply_smoothing=True
+    ) 
     
-    # 4. Scale the clean mask back up to original 4K/1080p resolution
+    # Resize mask back to image resolution
     high_res_mask = cv2.resize(clean_mask, (orig_w, orig_h), interpolation=cv2.INTER_LINEAR)
-    high_res_mask_3d = np.expand_dims(high_res_mask, axis=-1)
     
-    # 5. Apply the mask to the image
-    cutout = (input_image * high_res_mask_3d).astype(np.uint8)
+    # Convert mask to 0-255 uint8 alpha channel
+    alpha_channel = (high_res_mask * 255).astype(np.uint8)
+    
+    # Merge RGB + Alpha to create a transparent PNG cutout
+    r, g, b = cv2.split(input_image)
+    cutout = cv2.merge((r, g, b, alpha_channel))
     
     return cutout
 
-# -------------------------------------------------------------
-# 4. CREATE THE GRADIO UI
-# -------------------------------------------------------------
 demo = gr.Interface(
     fn=remove_background,  
-    inputs=[
-        gr.Image(type="numpy", label="Upload Image"),
-        gr.Radio(
-            choices=[
-                "Model A: The Portrait Specialist", 
-                "Model B: The Generalist (Harsh Lighting)",
-                "Model C: The Ensemble (Averages A + B)" 
-            ],
-            value="Model C: The Ensemble (Averages A + B)", # Default selection
-            label="Select Model Version"
-        )
-    ],
-    outputs=gr.Image(type="numpy", label="Background Removed"),
+    inputs=gr.Image(type="numpy", image_mode="RGB", label="Upload Image"),
+    outputs=gr.Image(type="numpy", image_mode="RGBA", format="png", label="Background Removed"),
     title="U-Net Background Remover",
-    description="A Custom ResUNet built from scratch. Compare the Specialist, the Generalist, and the Ensemble!"
+    description="Powered by a custom Residual U-Net built from scratch. Inference utilizes Test-Time Augmentation (TTA) and OpenCV Post-Processing."
 )
 
-demo.launch()
+if __name__ == "__main__":
+    demo.launch()

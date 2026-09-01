@@ -33,8 +33,6 @@ class HumanSegmentationDataset(Dataset):
         
         img_partial_path = self.data.iloc[idx]['images']
         mask_partial_path = self.data.iloc[idx]['masks']
-        
-        # 2. Create the full absolute paths
         image_path = os.path.join(self.dataset_root, img_partial_path)
         mask_path = os.path.join(self.dataset_root, mask_partial_path)
         image = np.array(Image.open(image_path).convert("RGB"))
@@ -44,16 +42,8 @@ class HumanSegmentationDataset(Dataset):
             augmented = self.transform(image=image, mask=mask)
             image = augmented['image']
             mask = augmented['mask']
-
-        # Albumentations ToTensorV2 leaves 2D masks as [H, W]. 
-        # PyTorch BCEWithLogitsLoss expects [1, H, W], so we add the channel dimension:
         mask = mask.unsqueeze(0) 
-        
-        # Normalize mask to 0 and 1, and ensure it's a float tensor
         mask = (mask > 0).float()
-        
-        # Scale image pixels from [0, 255] to [0, 1] 
-        # (Albumentations ToTensorV2 doesn't auto-divide by 255 like torchvision does)
         image = image / 255.0
 
         return image, mask

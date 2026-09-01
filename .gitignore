@@ -1,0 +1,14 @@
+# Large directories & weights
+models/
+Project_Results/
+*.pth
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Virtual environments & notebooks
+.ipynb_checkpoints/
+.env
+venv/

@@ -6,9 +6,7 @@ def get_boundary(mask, kernel_size=3):
     Extracts the boundary of a binary mask using morphological operations (MaxPool).
     mask: (B, 1, H, W) tensor
     """
-    # Max pool acts as morphological dilation
     dilated = F.max_pool2d(mask, kernel_size, stride=1, padding=kernel_size//2)
-    # Min pool acts as morphological erosion
     eroded = -F.max_pool2d(-mask, kernel_size, stride=1, padding=kernel_size//2)
     boundary = dilated - eroded
     return boundary
@@ -19,14 +17,9 @@ def boundary_f1(pred, target, tolerance=5):
     """
     pred_b = get_boundary(pred)
     target_b = get_boundary(target)
-    
-    # Dilate boundaries to allow for tolerance (e.g. 5x5 kernel -> 2 pixel tolerance)
     target_b_dilated = F.max_pool2d(target_b, tolerance, stride=1, padding=tolerance//2)
     pred_b_dilated = F.max_pool2d(pred_b, tolerance, stride=1, padding=tolerance//2)
-    
-    # True positives for precision
     tp_p = (pred_b * target_b_dilated).sum(dim=(1, 2, 3))
-    # True positives for recall
     tp_r = (target_b * pred_b_dilated).sum(dim=(1, 2, 3))
     
     precision = (tp_p + 1e-8) / (pred_b.sum(dim=(1, 2, 3)) + 1e-8)
@@ -42,12 +35,8 @@ def boundary_iou(pred, target, tolerance=5):
     """
     pred_b = get_boundary(pred)
     target_b = get_boundary(target)
-    
-    # Dilate boundaries to capture pixels within tolerance
     pred_b_dilated = F.max_pool2d(pred_b, tolerance, stride=1, padding=tolerance//2)
     target_b_dilated = F.max_pool2d(target_b, tolerance, stride=1, padding=tolerance//2)
-    
-    # Intersection and Union of the boundary regions
     intersection = (pred_b_dilated * target_b_dilated).sum(dim=(1, 2, 3))
     union = torch.max(pred_b_dilated, target_b_dilated).sum(dim=(1, 2, 3))
     

@@ -4,8 +4,6 @@ from torch import nn
 class ConvBlock(nn.Module):
     def __init__(self, in_channels, out_channels):
         super(ConvBlock, self).__init__()
-
-        # Defining the layers inside nn.Sequential for cleaner code
         self.block = nn.Sequential(
             nn.Conv2d(
                 in_channels=in_channels,
@@ -30,7 +28,6 @@ class ConvBlock(nn.Module):
 
     def forward(self, x):
         return self.block(x)
-
 
 class ResidualConvBlock(nn.Module):
     def __init__(self, in_channels, out_channels):
@@ -66,7 +63,6 @@ class ResidualConvBlock(nn.Module):
 
         return x
 
-
 class EncoderBlock(nn.Module):
     def __init__(self, in_channels, out_channels, use_residual=True):
         super(EncoderBlock, self).__init__()
@@ -78,12 +74,10 @@ class EncoderBlock(nn.Module):
 
         self.max_pool = nn.MaxPool2d(kernel_size=2, stride=2)
 
-
     def forward(self, x):
         skip = self.conv_block(x)
         pooled = self.max_pool(skip)
         return pooled, skip
-
 
 class Encoder(nn.Module):
     def __init__(self, use_residual=True):
@@ -111,7 +105,6 @@ class Encoder(nn.Module):
 
         return pooled4, self.skips
 
-
 class Bottleneck(nn.Module):
     def __init__(self, in_channels, out_channels, use_residual=True):
         super().__init__()
@@ -124,13 +117,9 @@ class Bottleneck(nn.Module):
     def forward(self, x):
         return self.conv_block(x)
 
-
 class DecoderBlock(nn.Module):
     def __init__(self, in_channels, skip_channels, out_channels, use_residual=True):
         super().__init__()
-
-        # What layer do we already have
-        # that can transform these channels?
         self.upsample = nn.Sequential(
             nn.Upsample(
                 scale_factor=2,
@@ -155,7 +144,6 @@ class DecoderBlock(nn.Module):
         x = torch.cat([x, skip], dim=1)
         x = self.conv_block(x)
         return x
-
 
 class Decoder(nn.Module):
     def __init__(self, use_residual=True):
@@ -196,7 +184,6 @@ class Decoder(nn.Module):
         x = self.decoder_block_4(x, skips[0])
         return x
 
-
 class SegmentationHead(nn.Module):
     def __init__(self):
         super().__init__()
@@ -209,7 +196,6 @@ class SegmentationHead(nn.Module):
 
     def forward(self, x):
         return self.one_one_conv(x)
-
 
 class BackgroundRemoval(nn.Module):
     def __init__(self, use_residual=True):

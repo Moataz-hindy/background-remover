@@ -30,7 +30,6 @@ def evaluate_model(
             probs = torch.sigmoid(logits)
             
             if apply_postprocess:
-                # Postprocessing works on numpy arrays, so we process each item in batch
                 pred_masks = []
                 for i in range(batch_size):
                     mask = (probs[i] > threshold).float()
@@ -41,10 +40,8 @@ def evaluate_model(
                         apply_largest_component=apply_largest_component,
                         apply_smoothing=apply_smoothing
                     )
-                    # Convert back to tensor
                     pred_masks.append(torch.tensor(processed, device=device).unsqueeze(0))
                 pred = torch.stack(pred_masks)
-                # processed masks are soft (due to gaussian blur), so we threshold again at 0.5
                 if apply_smoothing:
                     pred = (pred > 0.5).float()
             else:
@@ -76,8 +73,6 @@ def run_evaluation(
 ):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
-
-    # Model
     model = model_class().to(device)
     checkpoint = torch.load(checkpoint_path, map_location=device)
     if isinstance(checkpoint, dict) and "model_state_dict" in checkpoint:
