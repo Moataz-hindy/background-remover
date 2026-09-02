@@ -8,8 +8,10 @@ A complete end-to-end Machine Learning pipeline for human image segmentation (ba
 
 The goal of this project was to demonstrate core Deep Learning fundamentals: custom architecture design, ablation studies, diagnosing dataset bias, hypothesis testing, and engineering a robust production inference pipeline.
 
-### 🚀 Try the Live Web App
-**[Click here to try the model live on Hugging Face Spaces!](https://background-remover-ui.vercel.app/)**
+### 🚀 Try the Live App
+- 🌐 **React Web App:** [background-remover-ui.vercel.app](https://background-remover-ui.vercel.app/)
+- 🤗 **Hugging Face Space (Gradio / Backend):** [moataz115/background-remover](https://huggingface.co/spaces/moataz115/background-remover)
+
 
 ---
 
@@ -34,6 +36,8 @@ To achieve production-level boundaries, I conducted a strict ablation study, mak
 > *(Note on Exp 4: Increasing the image resolution to 384x384 resulted in degraded performance and massive overfitting. It was discarded for subsequent experiments).*
 > 
 > *(Note on Exp 5: Focal Loss provided the strongest overall performance on the standard test set, particularly improving the Boundary F1 score by penalizing the model for ignoring complex edges).*
+> 
+> *(Why Experiment 6 over Experiment 3? While Exp 3 scored higher raw IoU/Dice on the Challenge Set, it did so through broad coverage with high recall of 0.8963 vs. 0.8742 at the expense of lower precision of 0.9043 vs. 0.9097. In human matting, loose masks result in background bleeding and unsightly halo fringing around hair and limbs. Exp 6 retains the cumulative benefits of previous stages—Spatial Augmentations + Focal Loss—and introduces **Residual ConvBlocks**, which prevent gradient degradation in from-scratch training. This produces sharper, halo-free boundaries that pair seamlessly with OpenCV morphological post-processing).*
 
 ### Post-Processing Ablation (Experiment 6)
 
@@ -145,10 +149,10 @@ run_training(model_class=get_baseline_model, loss_class=BCEDiceLoss)
 # 4. + High Resolution (384px) (Code handles resize in dataset.py)
 run_training(model_class=get_baseline_model, loss_class=BCEDiceLoss)
 
-# 5. + Focal Loss (256px) - The Winning Model
+# 5. + Focal Loss (256px)
 run_training(model_class=get_baseline_model, loss_class=FocalDiceLoss)
 
-# 6. + Residual ConvBlocks
+# 6. + Residual ConvBlocks - The Winning (Deployed) Model
 run_training(model_class=get_residual_model, loss_class=FocalDiceLoss)
 
 # 7. The "Anti-Lazy" Model (Code handles heavy augmentations in dataset.py)
@@ -178,3 +182,28 @@ test_metrics = run_evaluation(
 - **Computer Vision:** OpenCV (cv2)
 - **Data Augmentation:** Albumentations
 - **Deployment:** Gradio, Hugging Face Spaces (ZeroGPU Microservice architecture)
+
+---
+
+## 📚 References
+
+1. **U-Net Architecture:**
+   - Ronneberger, O., Fischer, P., & Brox, T. (2015). *U-Net: Convolutional Networks for Biomedical Image Segmentation*. MICCAI 2015. [arXiv:1505.04597](https://arxiv.org/abs/1505.04597).
+
+2. **Deep Residual Learning:**
+   - He, K., Zhang, X., Ren, S., & Sun, J. (2016). *Deep Residual Learning for Image Recognition*. CVPR 2016. [arXiv:1512.03385](https://arxiv.org/abs/1512.03385).
+
+3. **Focal Loss:**
+   - Lin, T.-Y., Goyal, P., Girshick, R., He, K., & Dollár, P. (2017). *Focal Loss for Dense Object Detection*. ICCV 2017. [arXiv:1708.02002](https://arxiv.org/abs/1708.02002).
+
+4. **Dice Loss:**
+   - Milletari, F., Navab, N., & Ahmadi, S.-A. (2016). *V-Net: Fully Convolutional Neural Networks for Volumetric Medical Image Segmentation*. 3DV 2016. [arXiv:1606.04797](https://arxiv.org/abs/1606.04797).
+
+5. **Boundary IoU Metric:**
+   - Cheng, B., Girshick, R., Dollár, P., Berg, A. C., & Kirillov, A. (2021). *Boundary IoU: Improving Object-Centric Image Segmentation Evaluation*. CVPR 2021. [arXiv:2103.16562](https://arxiv.org/abs/2103.16562).
+
+6. **Boundary F1 Measure:**
+   - Csurka, G., Larlus, D., Perronnin, F., & Meylan, F. (2013). *What is a good evaluation measure for semantic segmentation?*. BMVC 2013.
+
+7. **Albumentations Library:**
+   - Buslaev, A., Iglovikov, V. I., Khvedchenya, E., Parinov, A., Druzhinin, M., & Kalinin, A. A. (2020). *Albumentations: Fast and Flexible Image Augmentations*. Information, 11(2), 125. [DOI:10.3390/info11020125](https://doi.org/10.3390/info11020125).
